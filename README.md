@@ -31,5 +31,5 @@ $ cd ..
 $ cp ../somewhere/20250203_VRDB_Extract.txt .
 
 # Run the main script
-
+$ python find-decedents.py temp 20250203_VRDB_Extract.txt > output.txt 2>&1
 ```
