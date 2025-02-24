@@ -16,6 +16,8 @@ The voter registration data file has a filename like follows:
 $ git clone https://github.com/mwaga-code/decedents-finder.git
 $ cd decedents-finder
 $ pip -r requirements.txt
+
+# Fetch decedents lists from King county web site.
 $ python fetch-decedents-lists.py \
   https://kingcounty.gov/en/dept/dph/health-safety/medical-examiner/decedents
 ...
@@ -33,3 +35,8 @@ $ cp ../somewhere/20250203_VRDB_Extract.txt .
 # Run the main script
 $ python find-decedents.py temp 20250203_VRDB_Extract.txt > output.txt 2>&1
 ```
+
+# TODO
+- Add more decedents list sources from other county.
+- Automate
+- Better reporting
