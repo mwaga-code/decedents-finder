@@ -49,18 +49,97 @@ def find_pdf_urls_from_page(page_url):
         print(f"Error fetching {page_url}: {e}")
         return []
 
+# Clean PDF filename by removing variations of "(Revised)", "(Corrected)", etc.
+def clean_pdf_filename(filename):
+    # URL decode the filename first
+    filename = filename.replace('%20', '_')
+    
+    # Check if the filename ends with the date pattern (MMDDYYYY.pdf)
+    if not re.search(r'\d{8}\.pdf$', filename):
+        # If it doesn't end with the date pattern, it's likely a revised/corrected version
+        # Extract the base name (everything before the first double underscore)
+        base_name = filename.split('__')[0]
+        # Add the date pattern if it's missing
+        if not re.search(r'\d{8}\.pdf$', base_name):
+            date_match = re.search(r'\d{8}', base_name)
+            if date_match:
+                base_name = base_name[:date_match.start() + 8] + '.pdf'
+        return base_name
+    
+    # For regular filenames, remove URL-encoded parentheses and their contents
+    filename = re.sub(r'%28.*?%29', '', filename)
+    # Remove regular parentheses and their contents
+    filename = re.sub(r'\(.*?\)', '', filename)
+    # Clean up any double underscores that might have been created
+    filename = re.sub(r'_+', '_', filename)
+    # Remove trailing underscores and dots
+    filename = filename.rstrip('_.')
+    return filename
+
+# Group PDF URLs by their cleaned filename
+def group_pdf_urls(pdf_urls):
+    groups = {}
+    for url in pdf_urls:
+        original_filename = url.split('/')[-1]
+        clean_filename = clean_pdf_filename(original_filename)
+        if clean_filename not in groups:
+            groups[clean_filename] = []
+        groups[clean_filename].append((url, original_filename))
+    return groups
+
 # Download PDF and return its filepath
 def download_pdf(pdf_url, temp_dir):
     try:
-        filename = pdf_url.split('/')[-1].replace('%20', '_')  # Replace URL-encoded spaces with underscores
-        filepath = os.path.join(temp_dir, filename)
+        original_filename = pdf_url.split('/')[-1]
+        clean_filename = clean_pdf_filename(original_filename)
+        filepath = os.path.join(temp_dir, clean_filename)
+        
         response = requests.get(pdf_url)
         response.raise_for_status()
         with open(filepath, 'wb') as f:
             f.write(response.content)
+        print(f"Saved: {clean_filename}")
         return filepath
     except requests.RequestException as e:
         print(f"Error downloading PDF {pdf_url}: {e}")
+        return None
+
+# Process a group of PDF URLs (same cleaned filename)
+def process_pdf_group(group, temp_dir):
+    if len(group) == 1:
+        # Only one version, just download it
+        url, _ = group[0]
+        return download_pdf(url, temp_dir)
+    
+    # Multiple versions, identify original and revised
+    original_url = None
+    revised_url = None
+    
+    for url, original_filename in group:
+        if re.search(r'\d{8}\.pdf$', original_filename):
+            original_url = url
+        else:
+            revised_url = url
+    
+    if original_url and revised_url:
+        # Download original first and save as .org.pdf
+        original_filename = original_url.split('/')[-1]
+        clean_filename = clean_pdf_filename(original_filename)
+        filepath = os.path.join(temp_dir, clean_filename)
+        org_filepath = os.path.join(temp_dir, clean_filename.replace('.pdf', '.org.pdf'))
+        
+        response = requests.get(original_url)
+        response.raise_for_status()
+        with open(org_filepath, 'wb') as f:
+            f.write(response.content)
+        print(f"Saved original: {os.path.basename(org_filepath)}")
+        
+        # Then download and save the revised version
+        return download_pdf(revised_url, temp_dir)
+    else:
+        # If we can't identify original/revised, just download all versions
+        for url, _ in group:
+            download_pdf(url, temp_dir)
         return None
 
 # Extract names and ages from PDF
@@ -195,9 +274,13 @@ def main(page_url):
             print("No PDF URLs found.")
             return
 
-        for pdf_url in all_pdf_urls:
-            print(f"\nProcessing PDF: {pdf_url}")
-            pdf_path = download_pdf(pdf_url, TEMP_DIR)
+        # Group PDFs by their cleaned filename
+        pdf_groups = group_pdf_urls(all_pdf_urls)
+        
+        # Process each group
+        for clean_filename, group in pdf_groups.items():
+            print(f"\nProcessing group: {clean_filename}")
+            process_pdf_group(group, TEMP_DIR)
   
     finally:
         driver.quit()

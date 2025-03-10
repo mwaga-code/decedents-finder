@@ -20,14 +20,6 @@ $ pip -r requirements.txt
 # Fetch decedents lists from King county web site.
 $ python fetch-decedents-lists.py \
   https://kingcounty.gov/en/dept/dph/health-safety/medical-examiner/decedents
-...
-...
-
-# Sometimes manual tweaks needed
-$ cd temp
-$ mv Decedents_List_11072024%28Revised%29.pdf Decedents_List_11072024.pdf
-$ mv Decedents_List_10182024_-_For_Correction.pdf Decedents_List_10182024.pdf
-$ cd ..
 
 # Copy the voter registration data
 $ cp ../somewhere/20250203_VRDB_Extract.txt .
@@ -38,5 +30,5 @@ $ python find-decedents.py temp 20250203_VRDB_Extract.txt > output.txt 2>&1
 
 # TODO
 - Add more decedents list sources from other county.
-- Automate
+- Automate whole process
 - Better reporting

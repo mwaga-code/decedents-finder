@@ -144,7 +144,7 @@ def match_decedents_with_voters(decedents, conn, pdf_year):
         possible_birth_years = [reference_year - age - 1, reference_year - age]
         
         query = """
-            SELECT FName, MName, LName, NameSuffix, Birthyear, Gender,
+            SELECT StateVoterID, FName, MName, LName, NameSuffix, Birthyear, Gender,
                    RegStNum, RegStFrac, RegStName, RegStType, RegUnitType,
                    RegStPreDirection, RegStPostDirection, RegStUnitNum,
                    RegStCity, RegState, RegZipCode, CountyCode,
@@ -159,43 +159,44 @@ def match_decedents_with_voters(decedents, conn, pdf_year):
         rows = cursor.fetchall()
         
         for row in rows:
-            voter_name = f"{row[0]} {row[1]} {row[2]}".strip().lower()
+            voter_name = f"{row[1]} {row[2]} {row[3]}".strip().lower()
             if is_name_match(name, voter_name):
                 matches.append({
                     'Name': name,
                     'VoterInfo': {
-                        'FName': row[0],
-                        'MName': row[1],
-                        'LName': row[2],
-                        'NameSuffix': row[3],
-                        'Birthyear': row[4],
-                        'Gender': row[5],
-                        'RegStNum': row[6],
-                        'RegStFrac': row[7],
-                        'RegStName': row[8],
-                        'RegStType': row[9],
-                        'RegUnitType': row[10],
-                        'RegStPreDirection': row[11],
-                        'RegStPostDirection': row[12],
-                        'RegStUnitNum': row[13],
-                        'RegStCity': row[14],
-                        'RegState': row[15],
-                        'RegZipCode': row[16],
-                        'CountyCode': row[17],
-                        'PrecinctCode': row[18],
-                        'PrecinctPart': row[19],
-                        'LegislativeDistrict': row[20],
-                        'CongressionalDistrict': row[21],
-                        'Mail1': row[22],
-                        'Mail2': row[23],
-                        'Mail3': row[24],
-                        'MailCity': row[25],
-                        'MailZip': row[26],
-                        'MailState': row[27],
-                        'MailCountry': row[28],
-                        'Registrationdate': row[29],
-                        'LastVoted': row[30],
-                        'StatusCode': row[31]
+                        'StateVoterID': row[0],
+                        'FName': row[1],
+                        'MName': row[2],
+                        'LName': row[3],
+                        'NameSuffix': row[4],
+                        'Birthyear': row[5],
+                        'Gender': row[6],
+                        'RegStNum': row[7],
+                        'RegStFrac': row[8],
+                        'RegStName': row[9],
+                        'RegStType': row[10],
+                        'RegUnitType': row[11],
+                        'RegStPreDirection': row[12],
+                        'RegStPostDirection': row[13],
+                        'RegStUnitNum': row[14],
+                        'RegStCity': row[15],
+                        'RegState': row[16],
+                        'RegZipCode': row[17],
+                        'CountyCode': row[18],
+                        'PrecinctCode': row[19],
+                        'PrecinctPart': row[20],
+                        'LegislativeDistrict': row[21],
+                        'CongressionalDistrict': row[22],
+                        'Mail1': row[23],
+                        'Mail2': row[24],
+                        'Mail3': row[25],
+                        'MailCity': row[26],
+                        'MailZip': row[27],
+                        'MailState': row[28],
+                        'MailCountry': row[29],
+                        'Registrationdate': row[30],
+                        'LastVoted': row[31],
+                        'StatusCode': row[32]
                     }
                 })
     
@@ -204,6 +205,7 @@ def match_decedents_with_voters(decedents, conn, pdf_year):
 def format_voter_info(voter_info):
     """Format voter information in a readable way."""
     return {
+        'voter_id': voter_info['StateVoterID'],
         'name': f"{voter_info['FName']} {voter_info['MName']} {voter_info['LName']}".strip(),
         'address': f"{voter_info['RegStNum']} {voter_info['RegStFrac']} {voter_info['RegStName']} {voter_info['RegStType']} {voter_info['RegUnitType']} {voter_info['RegStPreDirection']} {voter_info['RegStPostDirection']} {voter_info['RegStUnitNum']}".strip(),
         'city': voter_info['RegStCity'],
@@ -237,6 +239,7 @@ def generate_report(matches, pdf_file, pdf_date):
         voter_info = format_voter_info(match['VoterInfo'])
         report.append(f"Match #{i}")
         report.append(f"{'-'*40}")
+        report.append(f"Voter ID: {voter_info['voter_id']}")
         report.append(f"Decedent Name: {match['Name']}")
         report.append(f"Voter Name: {voter_info['name']}")
         report.append(f"Registration Address: {voter_info['address']}")
@@ -258,11 +261,13 @@ def generate_report(matches, pdf_file, pdf_date):
     return '\n'.join(report)
 
 def main(pdf_folder, voter_file):
+    # Load voter registration data
     conn = load_voter_registration_to_sqlite(voter_file)
-    if conn is None:
+    if not conn:
+        print("Failed to load voter registration data.")
         return
 
-    pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith('.pdf')]
+    pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf') and not f.endswith('.org.pdf')]
     if not pdf_files:
         print(f"No PDF files found in {pdf_folder}.")
         return
@@ -272,33 +277,27 @@ def main(pdf_folder, voter_file):
     total_matches = 0
     reports = []
 
-    for pdf_file in pdf_files:
-        pdf_path = os.path.join(pdf_folder, pdf_file)
-        print(f"\nProcessing {pdf_file}...")
-
-        pdf_date = extract_date_from_filename(pdf_file)
+    # Process each PDF file in the folder
+    for filename in pdf_files:
+        pdf_path = os.path.join(pdf_folder, filename)
+        pdf_date = extract_date_from_filename(filename)
         if not pdf_date:
-            print(f"Skipping {pdf_file}: Could not determine date.")
+            print(f"Skipping {filename}: Could not extract date")
             continue
-
-        if not is_older_than_two_months(pdf_date):
-            print(f"Skipping {pdf_file}: Date {pdf_date.strftime('%m/%d/%Y')} is within the last 2 months.")
+            
+        if is_older_than_two_months(pdf_date):
+            print(f"Skipping {filename}: File is older than two months")
             continue
-
-        pdf_year = pdf_date.year
-
-        decedents = extract_names_and_ages_from_pdf(pdf_path)
-        if not decedents:
-            print(f"No decedents found in {pdf_file}.")
+            
+        print(f"\nProcessing {filename}...")
+        names_and_ages = extract_names_and_ages_from_pdf(pdf_path)
+        if not names_and_ages:
+            print(f"No names and ages found in {filename}")
             continue
-
-        print(f"Found {len(decedents)} decedents in {pdf_file}.")
-        print("Matching with voter records...")
-
-        matches = match_decedents_with_voters(decedents, conn, pdf_year)
+            
+        matches = match_decedents_with_voters(names_and_ages, conn, pdf_date.year)
         total_matches += len(matches)
-        
-        report = generate_report(matches, pdf_file, pdf_date)
+        report = generate_report(matches, filename, pdf_date)
         reports.append(report)
         print(report)
 
@@ -310,7 +309,7 @@ def main(pdf_folder, voter_file):
     print(f"Total matches found across all files: {total_matches}")
     print(f"Average matches per file: {total_matches/len(pdf_files):.1f}")
     print(f"{'='*80}\n")
-
+    
     conn.close()
 
 if __name__ == "__main__":
