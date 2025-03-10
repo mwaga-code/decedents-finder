@@ -49,15 +49,54 @@ def find_pdf_urls_from_page(page_url):
         print(f"Error fetching {page_url}: {e}")
         return []
 
+# Clean PDF filename by removing variations of "(Revised)", "(Corrected)", etc.
+def clean_pdf_filename(filename):
+    # URL decode the filename first
+    filename = filename.replace('%20', '_')
+    
+    # Check if the filename ends with the date pattern (MMDDYYYY.pdf)
+    if not re.search(r'\d{8}\.pdf$', filename):
+        # If it doesn't end with the date pattern, it's likely a revised/corrected version
+        # Extract the base name (everything before the first double underscore)
+        base_name = filename.split('__')[0]
+        # Add the date pattern if it's missing
+        if not re.search(r'\d{8}\.pdf$', base_name):
+            date_match = re.search(r'\d{8}', base_name)
+            if date_match:
+                base_name = base_name[:date_match.start() + 8] + '.pdf'
+        return base_name
+    
+    # For regular filenames, remove URL-encoded parentheses and their contents
+    filename = re.sub(r'%28.*?%29', '', filename)
+    # Remove regular parentheses and their contents
+    filename = re.sub(r'\(.*?\)', '', filename)
+    # Clean up any double underscores that might have been created
+    filename = re.sub(r'_+', '_', filename)
+    # Remove trailing underscores and dots
+    filename = filename.rstrip('_.')
+    return filename
+
 # Download PDF and return its filepath
 def download_pdf(pdf_url, temp_dir):
     try:
-        filename = pdf_url.split('/')[-1].replace('%20', '_')  # Replace URL-encoded spaces with underscores
-        filepath = os.path.join(temp_dir, filename)
+        original_filename = pdf_url.split('/')[-1]
+        clean_filename = clean_pdf_filename(original_filename)
+        filepath = os.path.join(temp_dir, clean_filename)
+        org_filepath = os.path.join(temp_dir, clean_filename.replace('.pdf', '.org'))
+        
         response = requests.get(pdf_url)
         response.raise_for_status()
+        
+        # Save the original file with .org extension
+        with open(org_filepath, 'wb') as f:
+            f.write(response.content)
+        print(f"Saved original: {os.path.basename(org_filepath)}")
+        
+        # Save the cleaned filename
         with open(filepath, 'wb') as f:
             f.write(response.content)
+        print(f"Saved cleaned: {clean_filename}")
+        
         return filepath
     except requests.RequestException as e:
         print(f"Error downloading PDF {pdf_url}: {e}")
