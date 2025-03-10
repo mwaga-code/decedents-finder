@@ -82,17 +82,20 @@ def download_pdf(pdf_url, temp_dir):
         original_filename = pdf_url.split('/')[-1]
         clean_filename = clean_pdf_filename(original_filename)
         filepath = os.path.join(temp_dir, clean_filename)
-        org_filepath = os.path.join(temp_dir, clean_filename.replace('.pdf', '.org'))
         
+        # If the original filename doesn't end with date pattern, check if original file exists
+        if not re.search(r'\d{8}\.pdf$', original_filename):
+            if os.path.exists(filepath):
+                # Save existing file as .org.pdf
+                org_filepath = os.path.join(temp_dir, clean_filename.replace('.pdf', '.org.pdf'))
+                with open(org_filepath, 'wb') as f:
+                    with open(filepath, 'rb') as src:
+                        f.write(src.read())
+                print(f"Saved original: {os.path.basename(org_filepath)}")
+        
+        # Download and save the new file
         response = requests.get(pdf_url)
         response.raise_for_status()
-        
-        # Save the original file with .org extension
-        with open(org_filepath, 'wb') as f:
-            f.write(response.content)
-        print(f"Saved original: {os.path.basename(org_filepath)}")
-        
-        # Save the cleaned filename
         with open(filepath, 'wb') as f:
             f.write(response.content)
         print(f"Saved cleaned: {clean_filename}")
