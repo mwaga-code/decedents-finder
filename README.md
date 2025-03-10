@@ -30,4 +30,5 @@ $ python find-decedents.py temp 20250203_VRDB_Extract.txt > output.txt 2>&1
 
 # TODO
 - Add more decedents list sources from other county.
+- Automate whole process
 - Better reporting

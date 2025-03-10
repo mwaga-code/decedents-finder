@@ -264,11 +264,18 @@ def main(pdf_folder, voter_file):
         print("Failed to load voter registration data.")
         return
 
+    pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf') and not f.endswith('.org.pdf')]
+    if not pdf_files:
+        print(f"No PDF files found in {pdf_folder}.")
+        return
+
+    print(f"Found {len(pdf_files)} PDF files in {pdf_folder}. Processing...")
+    
+    total_matches = 0
+    reports = []
+
     # Process each PDF file in the folder
-    for filename in os.listdir(pdf_folder):
-        if not filename.endswith('.pdf') or filename.endswith('.org.pdf'):
-            continue
-            
+    for filename in pdf_files:
         pdf_path = os.path.join(pdf_folder, filename)
         pdf_date = extract_date_from_filename(filename)
         if not pdf_date:
@@ -286,8 +293,19 @@ def main(pdf_folder, voter_file):
             continue
             
         matches = match_decedents_with_voters(names_and_ages, conn, pdf_date.year)
+        total_matches += len(matches)
         report = generate_report(matches, filename, pdf_date)
+        reports.append(report)
         print(report)
+
+    # Print summary
+    print(f"\n{'='*80}")
+    print("SUMMARY")
+    print(f"{'='*80}")
+    print(f"Total PDF files processed: {len(pdf_files)}")
+    print(f"Total matches found across all files: {total_matches}")
+    print(f"Average matches per file: {total_matches/len(pdf_files):.1f}")
+    print(f"{'='*80}\n")
     
     conn.close()
 
