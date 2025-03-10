@@ -258,59 +258,37 @@ def generate_report(matches, pdf_file, pdf_date):
     return '\n'.join(report)
 
 def main(pdf_folder, voter_file):
+    # Load voter registration data
     conn = load_voter_registration_to_sqlite(voter_file)
-    if conn is None:
+    if not conn:
+        print("Failed to load voter registration data.")
         return
 
-    pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith('.pdf')]
-    if not pdf_files:
-        print(f"No PDF files found in {pdf_folder}.")
-        return
-
-    print(f"Found {len(pdf_files)} PDF files in {pdf_folder}. Processing...")
-    
-    total_matches = 0
-    reports = []
-
-    for pdf_file in pdf_files:
-        pdf_path = os.path.join(pdf_folder, pdf_file)
-        print(f"\nProcessing {pdf_file}...")
-
-        pdf_date = extract_date_from_filename(pdf_file)
+    # Process each PDF file in the folder
+    for filename in os.listdir(pdf_folder):
+        if not filename.endswith('.pdf') or filename.endswith('.org.pdf'):
+            continue
+            
+        pdf_path = os.path.join(pdf_folder, filename)
+        pdf_date = extract_date_from_filename(filename)
         if not pdf_date:
-            print(f"Skipping {pdf_file}: Could not determine date.")
+            print(f"Skipping {filename}: Could not extract date")
             continue
-
-        if not is_older_than_two_months(pdf_date):
-            print(f"Skipping {pdf_file}: Date {pdf_date.strftime('%m/%d/%Y')} is within the last 2 months.")
+            
+        if is_older_than_two_months(pdf_date):
+            print(f"Skipping {filename}: File is older than two months")
             continue
-
-        pdf_year = pdf_date.year
-
-        decedents = extract_names_and_ages_from_pdf(pdf_path)
-        if not decedents:
-            print(f"No decedents found in {pdf_file}.")
+            
+        print(f"\nProcessing {filename}...")
+        names_and_ages = extract_names_and_ages_from_pdf(pdf_path)
+        if not names_and_ages:
+            print(f"No names and ages found in {filename}")
             continue
-
-        print(f"Found {len(decedents)} decedents in {pdf_file}.")
-        print("Matching with voter records...")
-
-        matches = match_decedents_with_voters(decedents, conn, pdf_year)
-        total_matches += len(matches)
-        
-        report = generate_report(matches, pdf_file, pdf_date)
-        reports.append(report)
+            
+        matches = match_decedents_with_voters(names_and_ages, conn, pdf_date.year)
+        report = generate_report(matches, filename, pdf_date)
         print(report)
-
-    # Print summary
-    print(f"\n{'='*80}")
-    print("SUMMARY")
-    print(f"{'='*80}")
-    print(f"Total PDF files processed: {len(pdf_files)}")
-    print(f"Total matches found across all files: {total_matches}")
-    print(f"Average matches per file: {total_matches/len(pdf_files):.1f}")
-    print(f"{'='*80}\n")
-
+    
     conn.close()
 
 if __name__ == "__main__":
