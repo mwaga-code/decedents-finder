@@ -124,10 +124,9 @@ def load_voter_registration_to_sqlite(voter_file):
         df = df.dropna(subset=['Birthyear'])
         df['Birthyear'] = df['Birthyear'].astype(int)
         
-        df['OriginalLine'] = df.apply(lambda row: '|'.join(row.astype(str)), axis=1)
-        
         conn = sqlite3.connect(DB_FILE)
-        df[['FullName', 'Birthyear', 'OriginalLine']].to_sql('voters', conn, if_exists='replace', index=False)
+        # Store all columns in the database
+        df.to_sql('voters', conn, if_exists='replace', index=False)
         conn.execute('CREATE INDEX idx_name_birthyear ON voters (FullName, Birthyear)')
         print(f"Loaded {len(df)} voter records into SQLite database.")
         return conn
@@ -145,7 +144,14 @@ def match_decedents_with_voters(decedents, conn, pdf_year):
         possible_birth_years = [reference_year - age - 1, reference_year - age]
         
         query = """
-            SELECT FullName, OriginalLine
+            SELECT FName, MName, LName, NameSuffix, Birthyear, Gender,
+                   RegStNum, RegStFrac, RegStName, RegStType, RegUnitType,
+                   RegStPreDirection, RegStPostDirection, RegStUnitNum,
+                   RegStCity, RegState, RegZipCode, CountyCode,
+                   PrecinctCode, PrecinctPart, LegislativeDistrict,
+                   CongressionalDistrict, Mail1, Mail2, Mail3, MailCity,
+                   MailZip, MailState, MailCountry, Registrationdate,
+                   LastVoted, StatusCode
             FROM voters
             WHERE Birthyear IN (?, ?)
         """
@@ -153,16 +159,104 @@ def match_decedents_with_voters(decedents, conn, pdf_year):
         rows = cursor.fetchall()
         
         for row in rows:
-            voter_name, original_line = row
+            voter_name = f"{row[0]} {row[1]} {row[2]}".strip().lower()
             if is_name_match(name, voter_name):
                 matches.append({
                     'Name': name,
-                    'OriginalLine': original_line
+                    'VoterInfo': {
+                        'FName': row[0],
+                        'MName': row[1],
+                        'LName': row[2],
+                        'NameSuffix': row[3],
+                        'Birthyear': row[4],
+                        'Gender': row[5],
+                        'RegStNum': row[6],
+                        'RegStFrac': row[7],
+                        'RegStName': row[8],
+                        'RegStType': row[9],
+                        'RegUnitType': row[10],
+                        'RegStPreDirection': row[11],
+                        'RegStPostDirection': row[12],
+                        'RegStUnitNum': row[13],
+                        'RegStCity': row[14],
+                        'RegState': row[15],
+                        'RegZipCode': row[16],
+                        'CountyCode': row[17],
+                        'PrecinctCode': row[18],
+                        'PrecinctPart': row[19],
+                        'LegislativeDistrict': row[20],
+                        'CongressionalDistrict': row[21],
+                        'Mail1': row[22],
+                        'Mail2': row[23],
+                        'Mail3': row[24],
+                        'MailCity': row[25],
+                        'MailZip': row[26],
+                        'MailState': row[27],
+                        'MailCountry': row[28],
+                        'Registrationdate': row[29],
+                        'LastVoted': row[30],
+                        'StatusCode': row[31]
+                    }
                 })
     
     return matches
 
-# Main function
+def format_voter_info(voter_info):
+    """Format voter information in a readable way."""
+    return {
+        'name': f"{voter_info['FName']} {voter_info['MName']} {voter_info['LName']}".strip(),
+        'address': f"{voter_info['RegStNum']} {voter_info['RegStFrac']} {voter_info['RegStName']} {voter_info['RegStType']} {voter_info['RegUnitType']} {voter_info['RegStPreDirection']} {voter_info['RegStPostDirection']} {voter_info['RegStUnitNum']}".strip(),
+        'city': voter_info['RegStCity'],
+        'zip': voter_info['RegZipCode'],
+        'birth_year': voter_info['Birthyear'],
+        'registration_date': voter_info['Registrationdate'],
+        'last_voted': voter_info['LastVoted'],
+        'status': voter_info['StatusCode'],
+        'precinct': f"{voter_info['PrecinctCode']}{voter_info['PrecinctPart']}",
+        'legislative_district': voter_info['LegislativeDistrict'],
+        'congressional_district': voter_info['CongressionalDistrict'],
+        'mailing_address': f"{voter_info['Mail1']} {voter_info['Mail2']} {voter_info['Mail3']}".strip(),
+        'mailing_city': voter_info['MailCity'],
+        'mailing_zip': voter_info['MailZip'],
+        'mailing_state': voter_info['MailState']
+    }
+
+def generate_report(matches, pdf_file, pdf_date):
+    """Generate a formatted report for the matches found in a PDF file."""
+    if not matches:
+        return f"\nNo matches found in {pdf_file} (dated {pdf_date.strftime('%m/%d/%Y')})"
+    
+    report = []
+    report.append(f"\n{'='*80}")
+    report.append(f"Report for {pdf_file}")
+    report.append(f"PDF Date: {pdf_date.strftime('%m/%d/%Y')}")
+    report.append(f"Total Matches Found: {len(matches)}")
+    report.append(f"{'='*80}\n")
+    
+    for i, match in enumerate(matches, 1):
+        voter_info = format_voter_info(match['VoterInfo'])
+        report.append(f"Match #{i}")
+        report.append(f"{'-'*40}")
+        report.append(f"Decedent Name: {match['Name']}")
+        report.append(f"Voter Name: {voter_info['name']}")
+        report.append(f"Registration Address: {voter_info['address']}")
+        report.append(f"City: {voter_info['city']}")
+        report.append(f"ZIP: {voter_info['zip']}")
+        report.append(f"Precinct: {voter_info['precinct']}")
+        report.append(f"Legislative District: {voter_info['legislative_district']}")
+        report.append(f"Congressional District: {voter_info['congressional_district']}")
+        report.append(f"Birth Year: {voter_info['birth_year']}")
+        report.append(f"Registration Date: {voter_info['registration_date']}")
+        report.append(f"Last Voted: {voter_info['last_voted']}")
+        report.append(f"Status: {voter_info['status']}")
+        if voter_info['mailing_address']:
+            report.append("\nMailing Address:")
+            report.append(f"  {voter_info['mailing_address']}")
+            report.append(f"  {voter_info['mailing_city']}, {voter_info['mailing_state']} {voter_info['mailing_zip']}")
+        report.append(f"{'-'*40}\n")
+    
+    return '\n'.join(report)
+
 def main(pdf_folder, voter_file):
     conn = load_voter_registration_to_sqlite(voter_file)
     if conn is None:
@@ -174,10 +268,13 @@ def main(pdf_folder, voter_file):
         return
 
     print(f"Found {len(pdf_files)} PDF files in {pdf_folder}. Processing...")
+    
+    total_matches = 0
+    reports = []
 
     for pdf_file in pdf_files:
         pdf_path = os.path.join(pdf_folder, pdf_file)
-        print(f"\nChecking {pdf_file}...")
+        print(f"\nProcessing {pdf_file}...")
 
         pdf_date = extract_date_from_filename(pdf_file)
         if not pdf_date:
@@ -199,14 +296,20 @@ def main(pdf_folder, voter_file):
         print("Matching with voter records...")
 
         matches = match_decedents_with_voters(decedents, conn, pdf_year)
-        if matches:
-            print(f"Deceased individuals found in voter registration from {pdf_file}:")
-            for match in matches:
-                print(f"Name: {match['Name']}")
-                print(f"Original Voter Line: {match['OriginalLine']}")
-                print("-" * 40)
-        else:
-            print("No matches found in this PDF.")
+        total_matches += len(matches)
+        
+        report = generate_report(matches, pdf_file, pdf_date)
+        reports.append(report)
+        print(report)
+
+    # Print summary
+    print(f"\n{'='*80}")
+    print("SUMMARY")
+    print(f"{'='*80}")
+    print(f"Total PDF files processed: {len(pdf_files)}")
+    print(f"Total matches found across all files: {total_matches}")
+    print(f"Average matches per file: {total_matches/len(pdf_files):.1f}")
+    print(f"{'='*80}\n")
 
     conn.close()
 
