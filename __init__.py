@@ -1,0 +1,3 @@
+"""
+Decedents Finder package
+""" 
