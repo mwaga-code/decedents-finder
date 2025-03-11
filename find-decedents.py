@@ -98,13 +98,38 @@ def is_name_match(decedent_name, voter_name):
     else:
         return False
 
-# Load voter registration into SQLite, storing full lines if DB doesn't exist
+# Extract date from voter registration filename (e.g., "20250203_VRDB_Extract.txt")
+def extract_date_from_voter_file(filename):
+    date_match = re.search(r'^(\d{8})_', os.path.basename(filename))
+    if date_match:
+        return date_match.group(1)
+    return None
+
+# Load voter registration into SQLite, storing full lines if table doesn't exist
 def load_voter_registration_to_sqlite(voter_file):
-    if os.path.exists(DB_FILE):
-        print(f"Database '{DB_FILE}' already exists. Skipping data loading.")
-        return sqlite3.connect(DB_FILE)
-    
     try:
+        # Extract date from filename
+        date_part = extract_date_from_voter_file(voter_file)
+        if not date_part:
+            print(f"Error: Could not extract date from voter file {voter_file}")
+            return None
+        
+        table_name = f"voters_{date_part}"
+        conn = sqlite3.connect(DB_FILE)
+        
+        # Check if table exists
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='{table_name}'
+        """)
+        table_exists = cursor.fetchone() is not None
+        
+        if table_exists:
+            print(f"Table '{table_name}' already exists. Reusing existing data.")
+            return conn
+        
+        print(f"Creating new table '{table_name}' for voter data...")
         df = pd.read_csv(voter_file, delimiter='|', header=0, dtype=str, names=[
             'StateVoterID', 'FName', 'MName', 'LName', 'NameSuffix', 'Birthyear', 'Gender',
             'RegStNum', 'RegStFrac', 'RegStName', 'RegStType', 'RegUnitType', 'RegStPreDirection',
@@ -124,26 +149,38 @@ def load_voter_registration_to_sqlite(voter_file):
         df = df.dropna(subset=['Birthyear'])
         df['Birthyear'] = df['Birthyear'].astype(int)
         
-        conn = sqlite3.connect(DB_FILE)
-        # Store all columns in the database
-        df.to_sql('voters', conn, if_exists='replace', index=False)
-        conn.execute('CREATE INDEX idx_name_birthyear ON voters (FullName, Birthyear)')
-        print(f"Loaded {len(df)} voter records into SQLite database.")
+        # Store all columns in the database with the date-based table name
+        df.to_sql(table_name, conn, if_exists='replace', index=False)
+        conn.execute(f'CREATE INDEX idx_name_birthyear ON {table_name} (FullName, Birthyear)')
+        print(f"Loaded {len(df)} voter records into table '{table_name}'.")
         return conn
     except (FileNotFoundError, pd.errors.EmptyDataError) as e:
         print(f"Error loading voter file {voter_file}: {e}")
         return None
 
-# Match decedents with voters, retrieving the full original line
+# Match decedents with voters using the PDF year
 def match_decedents_with_voters(decedents, conn, pdf_year):
     matches = []
     cursor = conn.cursor()
+    
+    # Get the table name from the voter file date
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name LIKE 'voters_%'
+        ORDER BY name DESC LIMIT 1
+    """)
+    result = cursor.fetchone()
+    if not result:
+        print("Error: No voters table found in database")
+        return matches
+    
+    table_name = result[0]
     
     for name, age in decedents:
         reference_year = pdf_year if pdf_year else CURRENT_YEAR
         possible_birth_years = [reference_year - age - 1, reference_year - age]
         
-        query = """
+        query = f"""
             SELECT StateVoterID, FName, MName, LName, NameSuffix, Birthyear, Gender,
                    RegStNum, RegStFrac, RegStName, RegStType, RegUnitType,
                    RegStPreDirection, RegStPostDirection, RegStUnitNum,
@@ -152,7 +189,7 @@ def match_decedents_with_voters(decedents, conn, pdf_year):
                    CongressionalDistrict, Mail1, Mail2, Mail3, MailCity,
                    MailZip, MailState, MailCountry, Registrationdate,
                    LastVoted, StatusCode
-            FROM voters
+            FROM {table_name}
             WHERE Birthyear IN (?, ?)
         """
         cursor.execute(query, possible_birth_years)
