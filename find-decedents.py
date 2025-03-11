@@ -103,17 +103,15 @@ def extract_date_from_voter_file(filename):
     date_match = re.search(r'^(\d{8})_', os.path.basename(filename))
     if date_match:
         return date_match.group(1)
-    return None
+    # Use today's date as fallback
+    today = datetime.now()
+    return today.strftime('%Y%m%d')
 
 # Load voter registration into SQLite, storing full lines if table doesn't exist
 def load_voter_registration_to_sqlite(voter_file):
     try:
         # Extract date from filename
         date_part = extract_date_from_voter_file(voter_file)
-        if not date_part:
-            print(f"Error: Could not extract date from voter file {voter_file}")
-            return None
-        
         table_name = f"voters_{date_part}"
         conn = sqlite3.connect(DB_FILE)
         
