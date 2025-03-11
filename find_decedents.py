@@ -25,11 +25,6 @@ def extract_date_from_filename(filename):
     print(f"No date found in {filename}")
     return None
 
-# Check if the file is older than two months
-def is_older_than_two_months(file_date):
-    two_months_ago = datetime.now() - timedelta(days=60)
-    return file_date < two_months_ago
-
 # Extract names and ages from PDF
 def extract_names_and_ages_from_pdf(pdf_path):
     try:
@@ -333,6 +328,11 @@ def generate_report(matches, pdf_file, pdf_date):
     
     return '\n'.join(report)
 
+# Check if the file is older than two months
+def is_older_than_two_months(file_date):
+    two_months_ago = datetime.now() - timedelta(days=60)
+    return file_date < two_months_ago
+
 def main(pdf_folder, voter_file):
     # Load voter registration data
     conn = load_voter_registration_to_sqlite(voter_file)
@@ -358,8 +358,8 @@ def main(pdf_folder, voter_file):
             print(f"Skipping {filename}: Could not extract date")
             continue
             
-        if is_older_than_two_months(pdf_date):
-            print(f"Skipping {filename}: File is older than two months")
+        if not is_older_than_two_months(pdf_date):
+            print(f"Skipping {filename}: File date {pdf_date.strftime('%m/%d/%Y')} is newer than 2 months")
             continue
             
         print(f"\nProcessing {filename}...")
