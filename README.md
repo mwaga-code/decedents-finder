@@ -22,7 +22,7 @@ $ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 $ pip install -r requirements.txt
 
 # Fetch decedents lists from King county web site
-$ python fetch-decedents-lists.py \
+$ python fetch_decedents_lists.py \
   https://kingcounty.gov/en/dept/dph/health-safety/medical-examiner/decedents
 
 # Copy the voter registration data
