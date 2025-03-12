@@ -6,11 +6,32 @@ import pdfplumber
 import sqlite3
 import pandas as pd
 from fuzzywuzzy import fuzz
+import argparse
 
 # Constants
 TEMP_DIR = 'temp'  # Directory for PDFs
 DB_FILE = 'voters.db'  # SQLite database file
 CURRENT_YEAR = 2024  # Fallback year if filename parsing fails
+
+def initialize_decedents_table(conn, reset=False):
+    """Create or reset the table to track processed decedents."""
+    cursor = conn.cursor()
+    
+    if reset:
+        cursor.execute("DROP TABLE IF EXISTS processed_decedents")
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processed_decedents (
+            name TEXT,
+            age INTEGER,
+            first_seen_date DATE,
+            last_seen_date DATE,
+            case_number TEXT,
+            run_id TEXT,  -- Track which run processed this decedent
+            PRIMARY KEY (case_number, run_id)  -- Case number uniquely identifies a person
+        )
+    """)
+    conn.commit()
 
 # Extract date from filename (e.g., "Decedents_List_10152024.pdf")
 def extract_date_from_filename(filename):
@@ -34,62 +55,29 @@ def extract_names_and_ages_from_pdf(pdf_path):
                 text = page.extract_text()
                 if not text:
                     continue
-                
-                # First, find all case numbers and their positions
+                text = text.replace('\n', ' <NEWLINE> ')
                 case_pattern = r'(\d{2}-\d{5})'
-                case_matches = list(re.finditer(case_pattern, text))
-                
-                for i, match in enumerate(case_matches):
+                matches = list(re.finditer(case_pattern, text))
+                for i, match in enumerate(matches):
                     start_idx = match.start()
-                    end_idx = case_matches[i + 1].start() if i + 1 < len(case_matches) else len(text)
+                    end_idx = matches[i + 1].start() if i + 1 < len(matches) else len(text)
                     entry_text = text[start_idx:end_idx]
                     case_num = match.group(1)
-                    
-                    # Look for the age pattern
-                    age_pattern = r'(\d+)\s*years\s*(Male|Female)'
+                    age_pattern = r'(\d+)\s*years'
                     age_match = re.search(age_pattern, entry_text)
                     if not age_match:
                         continue
-                    
                     age = int(age_match.group(1))
+                    name_end_idx = age_match.start()
+                    name_text = entry_text[len(case_num):name_end_idx].strip()
+                    name = re.sub(r'(<NEWLINE>|<br>)', ' ', name_text).strip()
+                    name = ' '.join(name.split())
                     
-                    # Get text before and after the age
-                    before_age = entry_text[len(case_num):age_match.start()].strip()
-                    after_age = entry_text[age_match.end():].strip()
-                    
-                    # Extract name parts
-                    name_parts = []
-                    
-                    # Add the part before age
-                    if before_age:
-                        name_parts.append(before_age)
-                    
-                    # Look for additional name parts after "Male/Female"
-                    if after_age:
-                        # Split at "Date of Incident" and take the first part
-                        additional_text = after_age.split('Date of Incident')[0].strip()
-                        
-                        # Remove city names and dates
-                        cities = ['Seattle', 'Renton', 'Federal Way', 'Des Moines']
-                        date_pattern = r'\d{1,2}/\d{1,2}/\d{4}'
-                        
-                        # Remove dates
-                        additional_text = re.sub(date_pattern, '', additional_text)
-                        
-                        # Remove cities
-                        for city in cities:
-                            additional_text = additional_text.replace(city, '')
-                        
-                        # Clean up any remaining text
-                        additional_text = additional_text.strip()
-                        
-                        if additional_text:
-                            name_parts.append(additional_text)
-                    
-                    # Combine and clean up the name
-                    name = ' '.join(' '.join(name_parts).split())
-                    names_and_ages.append((name.lower(), age))
-        
+                    names_and_ages.append({
+                        'name': name.lower(),
+                        'age': age,
+                        'case_number': case_num
+                    })
         return names_and_ages
     except pdfplumber.PDFSyntaxError as e:
         print(f"Error processing PDF {pdf_path}: {e}")
@@ -333,12 +321,60 @@ def is_older_than_two_months(file_date):
     two_months_ago = datetime.now() - timedelta(days=60)
     return file_date < two_months_ago
 
-def main(pdf_folder, voter_file):
+def process_decedent(conn, decedent, pdf_date, run_id):
+    """Process a decedent, handling duplicates based on case number."""
+    cursor = conn.cursor()
+    
+    # First check if we've seen this case number in any previous run
+    cursor.execute("""
+        SELECT first_seen_date, run_id
+        FROM processed_decedents
+        WHERE case_number = ?
+        ORDER BY first_seen_date DESC LIMIT 1
+    """, (decedent['case_number'],))
+    
+    previous_result = cursor.fetchone()
+    
+    # Then check if we've seen this case in the current run
+    cursor.execute("""
+        SELECT first_seen_date
+        FROM processed_decedents
+        WHERE case_number = ? AND run_id = ?
+    """, (decedent['case_number'], run_id))
+    
+    current_run_result = cursor.fetchone()
+    
+    if current_run_result:
+        # We've seen this case in this run, skip it
+        return False
+    else:
+        # First time seeing this case in this run
+        # If we've seen it in a previous run, skip it
+        if previous_result:
+            return False
+        
+        # New case, add to tracking table
+        cursor.execute("""
+            INSERT INTO processed_decedents
+            (name, age, first_seen_date, last_seen_date, case_number, run_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (decedent['name'], decedent['age'], pdf_date.strftime('%Y-%m-%d'), pdf_date.strftime('%Y-%m-%d'), 
+              decedent['case_number'], run_id))
+        conn.commit()
+        return True  # Process new cases
+
+def main(pdf_folder, voter_file, reset=False):
+    # Generate a unique run ID using timestamp
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
     # Load voter registration data
     conn = load_voter_registration_to_sqlite(voter_file)
     if not conn:
         print("Failed to load voter registration data.")
         return
+
+    # Initialize decedents tracking table
+    initialize_decedents_table(conn, reset)
 
     pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf') and not f.endswith('.org.pdf')]
     if not pdf_files:
@@ -346,9 +382,15 @@ def main(pdf_folder, voter_file):
         return
 
     print(f"Found {len(pdf_files)} PDF files in {pdf_folder}. Processing...")
+    print(f"Run ID: {run_id}")
+    if reset:
+        print("Reset mode: Processing all files from scratch")
     
     total_matches = 0
     reports = []
+
+    # Sort PDF files by date to process older files first
+    pdf_files.sort(key=lambda x: extract_date_from_filename(x) or datetime.max)
 
     # Process each PDF file in the folder
     for filename in pdf_files:
@@ -363,12 +405,22 @@ def main(pdf_folder, voter_file):
             continue
             
         print(f"\nProcessing {filename}...")
-        names_and_ages = extract_names_and_ages_from_pdf(pdf_path)
-        if not names_and_ages:
+        decedents = extract_names_and_ages_from_pdf(pdf_path)
+        if not decedents:
             print(f"No names and ages found in {filename}")
             continue
+        
+        # Filter decedents to process based on deduplication rules
+        decedents_to_process = []
+        for decedent in decedents:
+            if process_decedent(conn, decedent, pdf_date, run_id):
+                decedents_to_process.append((decedent['name'], decedent['age']))
+        
+        if not decedents_to_process:
+            print(f"No new decedents to process in {filename}")
+            continue
             
-        matches = match_decedents_with_voters(names_and_ages, conn, pdf_date.year)
+        matches = match_decedents_with_voters(decedents_to_process, conn, pdf_date.year)
         total_matches += len(matches)
         report = generate_report(matches, filename, pdf_date)
         reports.append(report)
@@ -378,18 +430,29 @@ def main(pdf_folder, voter_file):
     print(f"\n{'='*80}")
     print("SUMMARY")
     print(f"{'='*80}")
+    print(f"Run ID: {run_id}")
     print(f"Total PDF files processed: {len(pdf_files)}")
     print(f"Total matches found across all files: {total_matches}")
-    print(f"Average matches per file: {total_matches/len(pdf_files):.1f}")
+    if len(pdf_files) > 0:
+        print(f"Average matches per file: {total_matches/len(pdf_files):.1f}")
+    print(f"{'='*80}\n")
+    
+    # Print deduplication statistics for current run
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM processed_decedents WHERE run_id = ?", (run_id,))
+    total_decedents = cursor.fetchone()[0]
+    print(f"Deduplication Statistics (This Run):")
+    print(f"Total unique decedents: {total_decedents}")
     print(f"{'='*80}\n")
     
     conn.close()
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python script.py <pdf_folder> <voter_file>")
-        sys.exit(1)
-
-    pdf_folder = sys.argv[1]
-    voter_file = sys.argv[2]
-    main(pdf_folder, voter_file)
+    parser = argparse.ArgumentParser(description='Process decedents lists and match with voter registration.')
+    parser.add_argument('pdf_folder', help='Folder containing PDF files')
+    parser.add_argument('voter_file', help='Voter registration file')
+    parser.add_argument('--reset', action='store_true', 
+                      help='Reset processed_decedents table and process all files from scratch')
+    
+    args = parser.parse_args()
+    main(args.pdf_folder, args.voter_file, args.reset)
