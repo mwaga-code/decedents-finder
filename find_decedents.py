@@ -47,8 +47,34 @@ def extract_names_and_ages_from_pdf(pdf_path):
                     age = int(age_match.group(1))
                     name_end_idx = age_match.start()
                     name_text = entry_text[len(case_num):name_end_idx].strip()
-                    name = re.sub(r'(<NEWLINE>|<br>)', ' ', name_text).strip()
+                    
+                    # Handle names split across lines
+                    # First, replace newline markers with spaces
+                    name = re.sub(r'\s*<NEWLINE>\s*|\s*<br>\s*', ' ', name_text)
+                    
+                    # Look for additional name parts between the age and "Date of Incident"
+                    if 'Date of Incident' in entry_text:
+                        after_age = entry_text[name_end_idx:entry_text.index('Date of Incident')].strip()
+                        # Split into lines and look for name parts
+                        lines = after_age.split('<NEWLINE>')
+                        for line in lines:
+                            line = line.strip()
+                            # Skip lines that look like metadata
+                            if any(x in line.lower() for x in ['years', 'male', 'female', 'seattle']):
+                                continue
+                            # Skip empty lines or lines starting with numbers
+                            if not line or line[0].isdigit():
+                                continue
+                            name = f"{name} {line}"
+                    
+                    # Remove any remaining numbers from the name
+                    name = re.sub(r'\d+', '', name)
+                    # Normalize whitespace
                     name = ' '.join(name.split())
+                    
+                    # Skip if name is empty after cleaning
+                    if not name:
+                        continue
                     
                     names_and_ages.append({
                         'name': name.lower(),
