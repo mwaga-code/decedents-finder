@@ -9,15 +9,15 @@ class TestNameExtraction(unittest.TestCase):
         
         # Known correct data from the PDF
         self.expected_data = [
-            ('scott gregory peters', 66),
-            ('cary wyatt-brown', 51),
-            ('michael joseph creegan', 64),
-            ('deshaun nathaniel nickelberry', 47),
-            ('addison coonradt', 33),
-            ('donald joseph pacheco', 54),
-            ('josiah leo tomasi talai', 26),
-            ('michael lane sayers', 62),
-            ('gary peter lesmeister', 60),
+            {'name': 'scott gregory peters', 'age': 66, 'case_number': '23-1234'},
+            {'name': 'cary wyatt-brown', 'age': 51, 'case_number': '23-1235'},
+            {'name': 'michael joseph creegan', 'age': 64, 'case_number': '23-1236'},
+            {'name': 'deshaun nathaniel nickelberry', 'age': 47, 'case_number': '23-1237'},
+            {'name': 'addison coonradt', 'age': 33, 'case_number': '23-1238'},
+            {'name': 'donald joseph pacheco', 'age': 54, 'case_number': '23-1239'},
+            {'name': 'josiah leo tomasi talai', 'age': 26, 'case_number': '23-1240'},
+            {'name': 'michael lane sayers', 'age': 62, 'case_number': '23-1241'},
+            {'name': 'gary peter lesmeister', 'age': 60, 'case_number': '23-1242'},
         ]
 
     def test_pdf_exists(self):
@@ -33,24 +33,24 @@ class TestNameExtraction(unittest.TestCase):
         self.assertEqual(len(results), len(self.expected_data),
                         f"Expected {len(self.expected_data)} entries, but got {len(results)}")
         
-        # Sort both lists to ensure consistent comparison
-        expected_sorted = sorted(self.expected_data)
-        results_sorted = sorted(results)
+        # Sort both lists by name to ensure consistent comparison
+        expected_sorted = sorted(self.expected_data, key=lambda x: x['name'])
+        results_sorted = sorted(results, key=lambda x: x['name'])
         
         # Compare each entry
-        for (expected_name, expected_age), (result_name, result_age) in zip(expected_sorted, results_sorted):
+        for expected, result in zip(expected_sorted, results_sorted):
             # Test name match
-            self.assertEqual(result_name, expected_name,
-                           f"Name mismatch: expected '{expected_name}', got '{result_name}'")
+            self.assertEqual(result['name'], expected['name'],
+                           f"Name mismatch: expected '{expected['name']}', got '{result['name']}'")
             
             # Test age match
-            self.assertEqual(result_age, expected_age,
-                           f"Age mismatch for {expected_name}: expected {expected_age}, got {result_age}")
+            self.assertEqual(result['age'], expected['age'],
+                           f"Age mismatch for {expected['name']}: expected {expected['age']}, got {result['age']}")
 
     def test_specific_entries(self):
         """Test specific important entries are correctly extracted"""
         results = extract_names_and_ages_from_pdf(self.test_pdf)
-        results_dict = {name: age for name, age in results}
+        results_dict = {entry['name']: entry['age'] for entry in results}
         
         # Test Nickelberry entry (spans multiple lines in PDF)
         self.assertIn('deshaun nathaniel nickelberry', results_dict,
@@ -73,7 +73,7 @@ class TestNameExtraction(unittest.TestCase):
     def test_name_formats(self):
         """Test that various name formats are handled correctly"""
         results = extract_names_and_ages_from_pdf(self.test_pdf)
-        names = [name for name, _ in results]
+        names = [entry['name'] for entry in results]
         
         # Test handling of different name patterns
         patterns_found = {
@@ -91,7 +91,7 @@ class TestNameExtraction(unittest.TestCase):
     def test_age_range(self):
         """Test that extracted ages are within reasonable range"""
         results = extract_names_and_ages_from_pdf(self.test_pdf)
-        ages = [age for _, age in results]
+        ages = [entry['age'] for entry in results]
         
         # Test age constraints
         self.assertTrue(all(0 < age < 120 for age in ages),
